@@ -1,10 +1,15 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -42,11 +47,14 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 	defer file.Close()
 
-	mediaType := header.Header.Get("Content-Type")
-
-	bytes, err := io.ReadAll(file)
+	mediaType, _, err := mime.ParseMediaType(header.Header.Get("Content-Type"))
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Unable to convert file to bytes", err)
+		respondWithError(w, http.StatusBadRequest, "Invalid format", err)
+		return
+	}
+
+	if mediaType != "image/jpeg" && mediaType != "image/png" {
+		respondWithError(w, http.StatusBadRequest, "Invalid format", err)
 		return
 	}
 
@@ -61,13 +69,33 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	data := base64.StdEncoding.EncodeToString(bytes)
-	dataURL := fmt.Sprintf("data:%v;base64,%v", mediaType, data)
-	videoMetadata.ThumbnailURL = &dataURL
+	fileExtension := ""
+	mediaTypeSplit := strings.Split(mediaType, "/")
+	if len(mediaTypeSplit) != 2 {
+		fileExtension = "bin"
+	} else {
+		fileExtension = mediaTypeSplit[1]
+	}
+
+	randomBytes := make([]byte, 32)
+	rand.Read(randomBytes)
+	base64Encoder := base64.URLEncoding
+	randomString := base64Encoder.EncodeToString(randomBytes)
+
+	path := filepath.Join(cfg.assetsRoot, randomString)
+	thumbnail, err := os.Create(fmt.Sprintf("%v.%v", path, fileExtension))
+	_, err = io.Copy(thumbnail, file)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "unable to save thumbnail", err)
+		return
+	}
+
+	thumbnailURL := fmt.Sprintf("http://localhost:%v/assets/%v.%v", cfg.port, randomString, fileExtension)
+	videoMetadata.ThumbnailURL = &thumbnailURL
 
 	err = cfg.db.UpdateVideo(videoMetadata)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Unable to update video metadata", err)
+		respondWithError(w, http.StatusBadRequest, "unable to create thumbnail", err)
 		return
 	}
 
