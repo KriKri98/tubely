@@ -86,6 +86,12 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err.Error(), err)
+		return
+	}
+
 	randomBytes := make([]byte, 32)
 	rand.Read(randomBytes)
 	base64Encoder := base64.URLEncoding
@@ -99,7 +105,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		fileExtension = mediaTypeSplit[1]
 	}
 
-	fileName := fmt.Sprintf("%v.%v", randomString, fileExtension)
+	fileName := fmt.Sprintf("%v/%v.%v", aspectRatio, randomString, fileExtension)
 
 	objectToUpload := &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
